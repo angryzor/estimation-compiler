@@ -1,5 +1,6 @@
 const yaml = require('js-yaml')
 const fs = require('fs')
+const util = require('util')
 const { groupBy, concat, map, flatten, flowRight, compact } = require('lodash/fp')
 const cartesian = require('cartesian-product')
 const leftPad = require('left-pad')
@@ -67,7 +68,7 @@ const nodeType = (node) => {
   } else if (node.min != null && node.max != null) {
     return NODE_TYPE.LEAF
   } else {
-    throw new Error('Invalid schema...\n' + console.log(JSON.stringify(node)))
+    throw new Error('Invalid schema...\n' + util.inspect(node))
   }
 }
 
@@ -77,11 +78,15 @@ const nodeType = (node) => {
 const localLibrary = (node, parentLibrary) =>
   Object.assign({}, parentLibrary, node.library || {})
 
-const compileNodeCompressive = (node, parentLibrary = {}) => {
+const compileNode = (strategy, node, parentLibrary = {}) => {
   const library = localLibrary(node, parentLibrary)
   const fullNode = resolveExtend(node, library)
-  const processNodes = (nodes) => nodes.map(node => compileNodeCompressive(node, library))
+  const processNodes = (nodes) => nodes.map(node => compileNode(strategy, node, library))
 
+  return strategy(processNodes, fullNode)
+}
+
+const compressive = (processNodes, fullNode) => {
   switch (nodeType(fullNode)) {
     case NODE_TYPE.ALL:
       return buildSumParent(fullNode, processNodes(fullNode.all))
@@ -92,11 +97,7 @@ const compileNodeCompressive = (node, parentLibrary = {}) => {
   }
 }
 
-const compileNodeExpansive = (node, parentLibrary = {}) => {
-  const library = localLibrary(node, parentLibrary)
-  const fullNode = resolveExtend(node, library)
-  const processNodes = (nodes) => nodes.map(node => compileNodeExpansive(node, library))
-
+const expansive = (processNodes, fullNode) => {
   switch (nodeType(fullNode)) {
     case NODE_TYPE.ALL:
       return cartesian(processNodes(fullNode.all)).map(results => buildSumParent(fullNode, results))
@@ -108,16 +109,16 @@ const compileNodeExpansive = (node, parentLibrary = {}) => {
 }
 
 const output = (result, padding = '') => {
-  console.log(`${leftPad(result.min, 8)} ${leftPad(result.max, 8)} | ${padding}${result.name}`)
+  console.log(`${leftPad(result.min.toFixed(2), 8)} ${leftPad(result.max.toFixed(2), 8)} | ${padding}${result.name}`)
   result.children.map(e => output(e, padding + '  '))
 }
 
-console.log('Compressive summary ')
+console.log('Compressed summary ')
 console.log('---------------------')
 console.log('     min      max | text')
-output(compileNodeCompressive(doc))
+output(compileNode(compressive, doc))
 
-compileNodeExpansive(doc).map((result, i) => {
+compileNode(expansive, doc).map((result, i) => {
   console.log('');
   console.log('Simulation ' + i)
   console.log('-----------------')
